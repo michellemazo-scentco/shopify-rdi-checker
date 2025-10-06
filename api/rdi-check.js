@@ -2,7 +2,20 @@ export default async function handler(req, res) {
     console.log("RDI checker triggered");
 
     try {
-        const body = await req.json();
+        // Parse JSON body manually
+        let body = {};
+        try {
+            const buffers = [];
+            for await (const chunk of req) {
+                buffers.push(chunk);
+            }
+            const data = Buffer.concat(buffers).toString();
+            body = JSON.parse(data);
+        } catch (parseErr) {
+            console.error("Failed to parse JSON:", parseErr);
+            return res.status(400).json({ error: "Invalid JSON body" });
+        }
+
         const { address1, city, state, zip } = body;
 
         const response = await fetch('https://api.easypost.com/v2/addresses', {
@@ -12,12 +25,7 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                address: {
-                    street1: address1,
-                    city,
-                    state,
-                    zip
-                }
+                address: { street1: address1, city, state, zip }
             })
         });
 
