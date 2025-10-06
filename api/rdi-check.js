@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 
         const { address1, city, state, zip } = body;
 
-        const response = await fetch('https://api.easypost.com/v2/addresses', {
+        const response = await fetch('https://api.easypost.com/v2/addresses?verify[]=delivery', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.EASYPOST_API_KEY}`,
