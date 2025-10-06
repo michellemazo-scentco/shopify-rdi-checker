@@ -1,24 +1,37 @@
 export default async function handler(req, res) {
-    try {
-        const { address1, city, state, zip } = req.body;
+    console.log("RDI checker triggered");
 
-        const epRes = await fetch('https://api.easypost.com/v2/addresses', {
+    try {
+        const body = await req.json();
+        const { address1, city, state, zip } = body;
+
+        const response = await fetch('https://api.easypost.com/v2/addresses', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.EASYPOST_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                address: { street1: address1, city, state, zip }
+                address: {
+                    street1: address1,
+                    city,
+                    state,
+                    zip
+                }
             })
         });
 
-        const data = await epRes.json();
-        res.status(200).json({
+        const data = await response.json();
+        console.log("EasyPost response:", data);
+
+        return res.status(200).json({
             residential: data.residential || false,
-            verification: data.verifications?.delivery?.success || false
+            verification: data.verifications?.delivery?.success || false,
+            message: "RDI check complete (EasyPost test mode may not show real residential results)"
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Handler error:", err);
+        return res.status(500).json({ error: err.message });
     }
 }
+
