@@ -1,8 +1,0 @@
-{
-    "version": 2,
-    "functions": {
-        "api/rdi-check.js": {
-            "runtime": "vercel/node@3"
-        }
-    }
-}
