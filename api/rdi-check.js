@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
     console.log("RDI checker triggered");
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', 'https://scentco-fundraising.myshopify.com');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
