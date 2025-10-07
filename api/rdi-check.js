@@ -1,15 +1,21 @@
 export default async function handler(req, res) {
     console.log("RDI checker triggered");
 
-    res.setHeader('Access-Control-Allow-Origin', 'https://scentco-fundraising.myshopify.com');
+    const origin = req.headers.origin;
+    const allowed = [
+        'https://scentco-fundraising.myshopify.com',
+        'https://centcofundraising.com s'
+    ];
+
+    // choose either the store domain or * for testing
+    res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    // ✅ Handle preflight (CORS check)
     if (req.method === 'OPTIONS') {
+        // Pre-flight always ends here
         return res.status(200).end();
     }
-
     try {
         // Parse JSON body manually
         let body = {};
