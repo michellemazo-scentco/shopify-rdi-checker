@@ -35,7 +35,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
             residential: data.residential || false,
             verification: data.verifications?.delivery?.success || false,
-            message: "RDI check complete (EasyPost test mode may not show real residential results)"
+            message: "RDI check complete"
         });
     } catch (err) {
         console.error("Handler error:", err);
