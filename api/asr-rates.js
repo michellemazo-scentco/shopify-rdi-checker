@@ -22,30 +22,34 @@ export default async function handler(req, res) {
         }
 
         const { address1, city, state, zip, country = 'US' } = to;
-
         if (!address1 || !city || !state || !zip) {
             return res.status(400).json({ error: 'Incomplete address data' });
         }
 
-        console.log('Verifying address with EasyPost...');
+        console.log('Verifying address with EasyPost...', { address1, city, state, zip, country });
 
-        // ✅ Use EasyPost.Address.create() + verify() instead of create_and_verify()
-        const address = await new api.Address({
+        // ✅ Correct syntax for EasyPost v6+
+        const address = await api.Address.create({
             street1: address1,
             city,
             state,
             zip,
             country,
-        }).save();
+        });
 
-        const verified = await address.verify();
+        let verified;
+        try {
+            verified = await address.verify();
+        } catch (verifyError) {
+            console.warn('Verification failed:', verifyError.message);
+            verified = null;
+        }
 
         console.log('Verification result:', verified);
 
-        // Determine residential/commercial
         const isResidential = verified?.residential ?? false;
 
-        const basePrice = 1000;
+        const basePrice = 1000; // 10.00 USD
         const totalPrice = isResidential ? basePrice + 1000 : basePrice;
 
         const rate = {
@@ -60,6 +64,7 @@ export default async function handler(req, res) {
             currency: 'USD',
         };
 
+        console.log('Returning rate:', rate);
         return res.status(200).json([rate]);
     } catch (error) {
         console.error('ASR rate error:', error);
