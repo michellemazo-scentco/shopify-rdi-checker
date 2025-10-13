@@ -23,41 +23,29 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Incomplete address data' });
         }
 
-        console.log('🛰️ Incoming address to verify:', { address1, city, state, zip, country });
+        console.log('🛰️ Verifying address:', { address1, city, state, zip, country });
 
-        // ✅ Create address
+        // ✅ Force USPS verification
         const address = await api.Address.create({
             street1: address1,
             city,
             state,
             zip,
             country,
+            verify: ['delivery'],
         });
 
-        // ✅ Try verifying it
-        let verified;
-        try {
-            verified = await address.verify();
-            console.log('✅ EasyPost verification result:', JSON.stringify(verified, null, 2));
-        } catch (verifyError) {
-            console.warn('⚠️ EasyPost verification error:', verifyError.message);
-            verified = null;
-        }
+        console.log('📦 EasyPost response:', JSON.stringify(address, null, 2));
 
-        // ✅ Print the raw EasyPost object (only for debug)
-        console.log('📦 Raw EasyPost Address object:', JSON.stringify(address, null, 2));
-
-        // 🧠 Try to extract "residential" flag from all known paths
+        const verified = address.verifications?.delivery;
         const isResidential =
-            verified?.verifications?.delivery?.details?.residential ??
-            verified?.residential ??
-            address?.residential ??
-            /apt|unit|#|suite/i.test(address1);
+            verified?.details?.residential ??
+            address.residential ??
+            /apt|unit|#|suite|rd|road|ln|dr/i.test(address1);
 
-        console.log(`🏠 Address classified as: ${isResidential ? 'Residential' : 'Commercial'}`);
+        console.log(`🏠 Classified as: ${isResidential ? 'Residential' : 'Commercial'}`);
 
-        // 💵 Calculate rate
-        const basePrice = 1000; // $10.00 base
+        const basePrice = 1000; // $10 base
         const totalPrice = isResidential ? basePrice + 1000 : basePrice;
 
         const rate = {
@@ -81,5 +69,6 @@ export default async function handler(req, res) {
         });
     }
 }
+
 
 
