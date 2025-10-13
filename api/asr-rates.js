@@ -6,64 +6,48 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // 🧩 Log the incoming request for debugging
     console.log('Incoming ASR request body:', JSON.stringify(req.body, null, 2));
 
-    // 🧩 Ensure the API key exists
-    if (!process.env.EASYPOST_API_KEY) {
-        console.error('Missing EasyPost API key');
+    const apiKey = process.env.EASYPOST_API_KEY;
+    if (!apiKey) {
         return res.status(500).json({ error: 'Missing EasyPost API key' });
     }
 
-    const api = new EasyPost(process.env.EASYPOST_API_KEY);
+    const api = new EasyPost(apiKey);
 
     try {
-        // 🧩 Support both "to" and "to_address" keys (ASR uses either)
         const to = req.body.to_address || req.body.to;
         if (!to) {
-            console.error('Missing "to_address" or "to" in request');
             return res.status(400).json({ error: 'Missing address in request body' });
         }
 
         const { address1, city, state, zip, country = 'US' } = to;
 
-        // 🧩 Validate all fields are present
         if (!address1 || !city || !state || !zip) {
             return res.status(400).json({ error: 'Incomplete address data' });
         }
 
-        console.log('Verifying address with EasyPost:', { address1, city, state, zip, country });
+        console.log('Verifying address with EasyPost...');
 
-        // 🧩 Verify address
-        const verified = await api.Address.create_and_verify({
+        // ✅ Use EasyPost.Address.create() + verify() instead of create_and_verify()
+        const address = await new api.Address({
             street1: address1,
             city,
             state,
             zip,
-            country
-        });
+            country,
+        }).save();
 
-        // 🧩 Handle if EasyPost fails to verify
-        if (!verified || !verified.verifications?.delivery?.success) {
-            console.warn('EasyPost verification failed, defaulting to commercial.');
-            return res.status(200).json([
-                {
-                    service_name: 'Standard Shipping (Unverified Address)',
-                    service_code: 'STD_UNVERIFIED',
-                    total_price: 1000,
-                    description: 'Address could not be verified — no fee applied',
-                    currency: 'USD'
-                }
-            ]);
-        }
+        const verified = await address.verify();
 
-        const isResidential = verified.residential ?? false;
+        console.log('Verification result:', verified);
 
-        // 🧩 Example pricing: base = $10, +$10 if residential
+        // Determine residential/commercial
+        const isResidential = verified?.residential ?? false;
+
         const basePrice = 1000;
         const totalPrice = isResidential ? basePrice + 1000 : basePrice;
 
-        // 🧩 Return ASR-compatible array
         const rate = {
             service_name: isResidential
                 ? 'Standard (Residential Fee Applied)'
@@ -73,17 +57,16 @@ export default async function handler(req, res) {
             description: isResidential
                 ? 'Includes $10 residential delivery fee'
                 : 'Commercial address — no fee',
-            currency: 'USD'
+            currency: 'USD',
         };
 
-        console.log('Returning rate:', rate);
         return res.status(200).json([rate]);
-
     } catch (error) {
         console.error('ASR rate error:', error);
         return res.status(500).json({
             error: 'Internal server error',
-            details: error.message || 'Unknown error'
+            details: error.message || 'Unknown error',
         });
     }
 }
+
