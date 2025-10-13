@@ -1,12 +1,9 @@
-// api/asr-rates.js
 import EasyPost from '@easypost/api';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
-
-    console.log('Incoming ASR request body:', JSON.stringify(req.body, null, 2));
 
     const apiKey = process.env.EASYPOST_API_KEY;
     if (!apiKey) {
@@ -26,9 +23,9 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Incomplete address data' });
         }
 
-        console.log('Verifying address with EasyPost...', { address1, city, state, zip, country });
+        console.log('🛰️ Incoming address to verify:', { address1, city, state, zip, country });
 
-        // ✅ Correct syntax for EasyPost v6+
+        // ✅ Create address
         const address = await api.Address.create({
             street1: address1,
             city,
@@ -37,19 +34,30 @@ export default async function handler(req, res) {
             country,
         });
 
+        // ✅ Try verifying it
         let verified;
         try {
             verified = await address.verify();
+            console.log('✅ EasyPost verification result:', JSON.stringify(verified, null, 2));
         } catch (verifyError) {
-            console.warn('Verification failed:', verifyError.message);
+            console.warn('⚠️ EasyPost verification error:', verifyError.message);
             verified = null;
         }
 
-        console.log('Verification result:', verified);
+        // ✅ Print the raw EasyPost object (only for debug)
+        console.log('📦 Raw EasyPost Address object:', JSON.stringify(address, null, 2));
 
-        const isResidential = verified?.residential ?? false;
+        // 🧠 Try to extract "residential" flag from all known paths
+        const isResidential =
+            verified?.verifications?.delivery?.details?.residential ??
+            verified?.residential ??
+            address?.residential ??
+            /apt|unit|#|suite/i.test(address1);
 
-        const basePrice = 1000; // 10.00 USD
+        console.log(`🏠 Address classified as: ${isResidential ? 'Residential' : 'Commercial'}`);
+
+        // 💵 Calculate rate
+        const basePrice = 1000; // $10.00 base
         const totalPrice = isResidential ? basePrice + 1000 : basePrice;
 
         const rate = {
@@ -64,14 +72,14 @@ export default async function handler(req, res) {
             currency: 'USD',
         };
 
-        console.log('Returning rate:', rate);
         return res.status(200).json([rate]);
     } catch (error) {
-        console.error('ASR rate error:', error);
+        console.error('💥 ASR rate error:', error);
         return res.status(500).json({
             error: 'Internal server error',
             details: error.message || 'Unknown error',
         });
     }
 }
+
 
