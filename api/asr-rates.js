@@ -1,31 +1,27 @@
 import EasyPost from '@easypost/api';
 
 export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-
     const apiKey = process.env.EASYPOST_API_KEY;
-    if (!apiKey) {
-        return res.status(500).json({ error: 'Missing EasyPost API key' });
-    }
-
     const api = new EasyPost(apiKey);
 
     try {
-        const to = req.body.to_address || req.body.to;
-        if (!to) {
-            return res.status(400).json({ error: 'Missing address in request body' });
+        // Basic Auth (optional, remove if not using it)
+        const auth = req.headers.authorization || '';
+        if (process.env.ASR_USER && process.env.ASR_PASS) {
+            const [type, encoded] = auth.split(' ');
+            if (type !== 'Basic') throw new Error('Missing auth header');
+            const [user, pass] = Buffer.from(encoded, 'base64').toString().split(':');
+            if (user !== process.env.ASR_USER || pass !== process.env.ASR_PASS) {
+                throw new Error('Invalid credentials');
+            }
         }
+
+        const to = req.body.to_address || req.body.to;
+        if (!to) throw new Error('Missing to_address');
 
         const { address1, city, state, zip, country = 'US' } = to;
-        if (!address1 || !city || !state || !zip) {
-            return res.status(400).json({ error: 'Incomplete address data' });
-        }
 
-        console.log('🛰️ Verifying address:', { address1, city, state, zip, country });
-
-        // ✅ Force USPS verification
+        // 🚀 Force verification
         const address = await api.Address.create({
             street1: address1,
             city,
@@ -35,38 +31,41 @@ export default async function handler(req, res) {
             verify: ['delivery'],
         });
 
-        console.log('📦 EasyPost response:', JSON.stringify(address, null, 2));
-
         const verified = address.verifications?.delivery;
         const isResidential =
             verified?.details?.residential ??
             address.residential ??
-            /apt|unit|#|suite|rd|road|ln|dr/i.test(address1);
+            /apt|unit|#|suite/i.test(address1);
 
-        console.log(`🏠 Classified as: ${isResidential ? 'Residential' : 'Commercial'}`);
-
-        const basePrice = 1000; // $10 base
-        const totalPrice = isResidential ? basePrice + 1000 : basePrice;
+        console.log(`🏠 Address classified as: ${isResidential ? 'Residential' : 'Commercial'}`);
 
         const rate = {
             service_name: isResidential
                 ? 'Standard (Residential Fee Applied)'
                 : 'Standard Shipping',
             service_code: isResidential ? 'RES_STD' : 'STD',
-            total_price: totalPrice,
+            total_price: isResidential ? 2000 : 1000, // 10.00 vs 20.00
             description: isResidential
                 ? 'Includes $10 residential delivery fee'
                 : 'Commercial address — no fee',
             currency: 'USD',
         };
 
+        // ✅ ASR requires an array, so always wrap in []
         return res.status(200).json([rate]);
     } catch (error) {
-        console.error('💥 ASR rate error:', error);
-        return res.status(500).json({
-            error: 'Internal server error',
-            details: error.message || 'Unknown error',
-        });
+        console.error('💥 ASR error:', error.message);
+
+        // ✅ Always return a valid array even on error
+        return res.status(200).json([
+            {
+                service_name: 'Standard Shipping (Fallback)',
+                service_code: 'FALLBACK',
+                total_price: 1000,
+                description: `Error: ${error.message}`,
+                currency: 'USD',
+            },
+        ]);
     }
 }
 
