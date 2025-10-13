@@ -1,0 +1,8 @@
+{
+    "name": "shopify-rdi-checker",
+    "version": "1.0.0",
+    "type": "module",
+    "dependencies": {
+        "@easypost/api": "^6.0.0"
+    }
+}
