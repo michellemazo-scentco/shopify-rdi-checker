@@ -1,7 +1,6 @@
 /**
- * RDI Checker API — with Slack Error Alerts
- * Version: 2025.10
- * Author: Code GPT
+ * RDI Checker API — Slack Logging for Every Address
+ * Logs all address checks (success or error) directly to Slack.
  */
 
 export default async function handler(req, res) {
@@ -19,12 +18,9 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    if (req.method === 'OPTIONS') {
-        console.log('⚙️ Preflight handled');
-        return res.status(200).end();
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
-    // --- BODY PARSING ---
+    // --- PARSE JSON BODY ---
     let body;
     try {
         const buffers = [];
@@ -32,21 +28,28 @@ export default async function handler(req, res) {
         body = JSON.parse(Buffer.concat(buffers).toString());
     } catch (parseErr) {
         console.error('❌ Failed to parse JSON:', parseErr);
-        await logErrorToWebhook('Invalid JSON body received', parseErr);
+        await sendSlackLog({
+            type: 'error',
+            title: 'Invalid JSON in RDI Request',
+            message: parseErr.message,
+            context: {}
+        });
         return res.status(400).json({ error: 'Invalid JSON body' });
     }
 
     const { address1, city, state, zip } = body || {};
     if (!address1 || !city || !state || !zip) {
-        console.warn('⚠️ Missing required address fields');
-        await logErrorToWebhook('Missing required address fields', null, { body });
+        await sendSlackLog({
+            type: 'error',
+            title: 'Missing Required Address Fields',
+            message: 'One or more required fields missing',
+            context: { address1, city, state, zip }
+        });
         return res.status(400).json({ error: 'Missing required address fields' });
     }
 
-    // --- EASypost VERIFY ---
+    // --- EASyPOST VERIFY ---
     try {
-        console.log('📦 Sending address to EasyPost:', body);
-
         const response = await fetch('https://api.easypost.com/v2/addresses?verify[]=delivery', {
             method: 'POST',
             headers: {
@@ -54,25 +57,34 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                address: {
-                    street1: address1,
-                    city,
-                    state,
-                    zip,
-                    country: 'US'
-                }
+                address: { street1: address1, city, state, zip, country: 'US' }
             })
         });
 
         const data = await response.json();
         console.log('📬 EasyPost Raw Response:', JSON.stringify(data, null, 2));
 
-        // Detect residential type (EasyPost often returns it nested)
         const verified = data.verifications?.delivery?.success || false;
-        const residential = data.verifications?.delivery?.details?.residential === true
-            || data.residential === true;
+        const residential =
+            data.verifications?.delivery?.details?.residential === true ||
+            data.residential === true;
 
-        // --- Return to Shopify frontend ---
+        // 🟢 Log Success to Slack
+        await sendSlackLog({
+            type: 'success',
+            title: '✅ RDI Address Check Successful',
+            message: verified
+                ? residential
+                    ? '🏠 Residential address detected'
+                    : '🏢 Commercial address detected'
+                : '⚠️ Address verification incomplete',
+            context: {
+                address: `${address1}, ${city}, ${state} ${zip}`,
+                verified,
+                residential
+            }
+        });
+
         return res.status(200).json({
             verified,
             residential,
@@ -82,24 +94,47 @@ export default async function handler(req, res) {
         });
     } catch (err) {
         console.error('💥 EasyPost API Error:', err);
-        await logErrorToWebhook('EasyPost API Error', err, { body });
+
+        await sendSlackLog({
+            type: 'error',
+            title: '💥 EasyPost API Error',
+            message: err.message,
+            context: {
+                address: `${address1}, ${city}, ${state} ${zip}`,
+                timestamp: new Date().toISOString()
+            }
+        });
+
         return res.status(500).json({ error: 'Internal Server Error', details: err.message });
     }
 }
 
 /* ----------------------------------------------------
-   SLACK LOGGER — Send alerts to your Slack channel
+   SLACK LOGGER — Send message to Slack every time
 ---------------------------------------------------- */
-async function logErrorToWebhook(message, err, context = {}) {
+async function sendSlackLog({ type = 'info', title, message, context = {} }) {
     try {
         if (!process.env.WEBHOOK_URL) {
             console.warn('⚠️ Missing WEBHOOK_URL in environment.');
             return;
         }
 
+        const color = type === 'error' ? '#e01e5a' : type === 'success' ? '#2eb67d' : '#439fe0';
+
         const payload = {
-            text: `🚨 *RDI Checker Alert*\n> *Message:* ${message}\n> *Error:* ${err?.message || 'None'
-                }\n> *Context:* \`${JSON.stringify(context, null, 2)}\`\n> *Timestamp:* ${new Date().toISOString()}`
+            attachments: [
+                {
+                    color,
+                    title,
+                    text: message,
+                    fields: Object.entries(context).map(([k, v]) => ({
+                        title: k,
+                        value: typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v),
+                        short: false
+                    })),
+                    footer: `RDI Checker • ${new Date().toLocaleString()}`
+                }
+            ]
         };
 
         const response = await fetch(process.env.WEBHOOK_URL, {
@@ -117,3 +152,4 @@ async function logErrorToWebhook(message, err, context = {}) {
         console.error('❌ Failed to send Slack alert:', webhookErr);
     }
 }
+
