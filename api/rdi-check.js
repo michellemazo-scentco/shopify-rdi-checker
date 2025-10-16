@@ -4,23 +4,25 @@ export default async function handler(req, res) {
     const origin = req.headers.origin;
     const allowed = [
         'https://scentco-fundraising.myshopify.com',
+        'https://www.scentcofundraising.com',
         'https://centcofundraising.com'
     ];
 
-    // Set up CORS
+    // ✅ Allow CORS from your domains (and all headers to fix Shopify preflight)
     res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', '*');
 
-    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
 
-    // Slack webhook
     const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
-    // Function to send Slack messages
+    // Helper to send Slack messages
     async function sendSlackMessage(title, text, context = {}) {
         if (!SLACK_WEBHOOK_URL) {
-            console.warn("⚠️ Slack webhook not configured — skipping Slack notification");
+            console.warn("⚠️ Slack webhook not configured — skipping notification");
             return;
         }
 
@@ -34,14 +36,14 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(message)
             });
-            console.log("📤 Slack message sent");
+            console.log("📤 Slack message sent successfully");
         } catch (err) {
-            console.error("❌ Error sending Slack message:", err);
+            console.error("❌ Slack message error:", err);
         }
     }
 
     try {
-        // Parse body safely
+        // Parse JSON body safely
         let body = {};
         try {
             const buffers = [];
@@ -55,11 +57,11 @@ export default async function handler(req, res) {
 
         const { address1, city, state, zip } = body;
         const referer = req.headers.referer || "";
-
         console.log("🔍 Referrer:", referer);
+        console.log("📫 Checking address:", { address1, city, state, zip });
 
-        // Verify address with EasyPost
-        const response = await fetch('https://api.easypost.com/v2/addresses?verify[]=delivery', {
+        // Verify address using EasyPost
+        const epRes = await fetch('https://api.easypost.com/v2/addresses?verify[]=delivery', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.EASYPOST_API_KEY}`,
@@ -70,7 +72,7 @@ export default async function handler(req, res) {
             })
         });
 
-        const data = await response.json();
+        const data = await epRes.json();
         console.log("📦 EasyPost response:", JSON.stringify(data, null, 2));
 
         const residential = data.residential ||
@@ -79,10 +81,9 @@ export default async function handler(req, res) {
 
         const success = data.verifications?.delivery?.success || false;
 
-        // --- Only send Slack message if this came from the delivery-check page ---
-        if (referer.includes("/pages/delivery-page")) {
-            console.log("✅ Slack notification triggered for delivery-check page");
-
+        // ✅ Only send Slack notification if triggered from /pages/delivery-check
+        if (referer.includes("/pages/delivery-check")) {
+            console.log("📢 Slack notification triggered (delivery-check page)");
             await sendSlackMessage(
                 residential ? "🏠 Residential Address Detected" : "🏢 Commercial Address Verified",
                 `Verification ${success ? "✅ Passed" : "⚠️ Failed"} from delivery-check page`,
@@ -100,13 +101,11 @@ export default async function handler(req, res) {
 
     } catch (err) {
         console.error("🔥 Handler error:", err);
-
         await sendSlackMessage(
             "🚨 RDI Checker Error",
             err.message,
             { stack: err.stack, timestamp: new Date().toISOString() }
         );
-
         return res.status(500).json({ error: err.message });
     }
 }
