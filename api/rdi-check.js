@@ -1,52 +1,51 @@
+/**
+ * RDI Checker API — with Slack Error Alerts
+ * Version: 2025.10
+ * Author: Code GPT
+ */
+
 export default async function handler(req, res) {
+    console.log('🚀 RDI Checker Triggered:', new Date().toISOString());
 
-
-    console.log('🚀 RDI Checker Triggered at', new Date().toISOString());
-
-    // 🔐 CORS Handling
+    // --- CORS SETUP ---
     const origin = req.headers.origin;
-    const allowed = [
+    const allowedOrigins = [
         'https://scentco-fundraising.myshopify.com',
-        'https://centcofundraising.com'
+        'https://centcofundraising.com',
+        'https://www.centcofundraising.com'
     ];
 
-    res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : '*');
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigins.includes(origin) ? origin : '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
-        console.log('⚙️ Preflight request handled.');
+        console.log('⚙️ Preflight handled');
         return res.status(200).end();
     }
 
-    await logErrorToWebhook('Test Alert', new Error('This is a Slack test'), { test: true });
-    return res.status(200).json({ ok: true, message: 'Slack test triggered!' });
-
-    // 🧩 Parse body safely
+    // --- BODY PARSING ---
     let body;
     try {
-        const chunks = [];
-        for await (const chunk of req) chunks.push(chunk);
-        const raw = Buffer.concat(chunks).toString();
-        body = JSON.parse(raw || '{}');
-        console.log('📦 Parsed request body:', body);
-    } catch (err) {
-        console.error('💥 JSON parse failed:', err.message);
-        await logErrorToWebhook('Invalid JSON Body', err, { rawBody: raw });
+        const buffers = [];
+        for await (const chunk of req) buffers.push(chunk);
+        body = JSON.parse(Buffer.concat(buffers).toString());
+    } catch (parseErr) {
+        console.error('❌ Failed to parse JSON:', parseErr);
+        await logErrorToWebhook('Invalid JSON body received', parseErr);
         return res.status(400).json({ error: 'Invalid JSON body' });
     }
 
     const { address1, city, state, zip } = body || {};
-
     if (!address1 || !city || !state || !zip) {
-        console.error('⚠️ Missing one or more required fields:', body);
-        await logErrorToWebhook('Missing required fields', null, { body });
-        return res.status(400).json({ error: 'Missing address fields' });
+        console.warn('⚠️ Missing required address fields');
+        await logErrorToWebhook('Missing required address fields', null, { body });
+        return res.status(400).json({ error: 'Missing required address fields' });
     }
 
+    // --- EASypost VERIFY ---
     try {
-        // 🧠 Log EasyPost Request
-        console.log('📬 Sending verification to EasyPost for:', `${address1}, ${city}, ${state} ${zip}`);
+        console.log('📦 Sending address to EasyPost:', body);
 
         const response = await fetch('https://api.easypost.com/v2/addresses?verify[]=delivery', {
             method: 'POST',
@@ -55,67 +54,66 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                address: { street1: address1, city, state, zip, country: 'US' }
+                address: {
+                    street1: address1,
+                    city,
+                    state,
+                    zip,
+                    country: 'US'
+                }
             })
         });
 
         const data = await response.json();
+        console.log('📬 EasyPost Raw Response:', JSON.stringify(data, null, 2));
 
-        // 🧾 Log everything from EasyPost
-        console.log('📦 Raw EasyPost response:', JSON.stringify(data, null, 2));
+        // Detect residential type (EasyPost often returns it nested)
+        const verified = data.verifications?.delivery?.success || false;
+        const residential = data.verifications?.delivery?.details?.residential === true
+            || data.residential === true;
 
-        if (response.status >= 400) {
-            console.error('❌ EasyPost API returned an error:', data);
-            await logErrorToWebhook('EasyPost API Error', null, { responseStatus: response.status, data });
-            return res.status(response.status).json({
-                error: 'EasyPost API error',
-                details: data
-            });
-        }
-
-        // 🧮 Extract relevant verification data
-        const verification = data?.verifications?.delivery;
-        const isResidential =
-            verification?.details?.residential ??
-            data.residential ??
-            /apt|unit|#|suite/i.test(address1);
-
-        const result = {
-            residential: !!isResidential,
-            verification_success: !!verification?.success,
-            message: isResidential
-                ? '🏠 Residential address detected'
-                : '🏢 Commercial address detected'
-        };
-
-        console.log('✅ Address classification result:', result);
-
-        return res.status(200).json(result);
+        // --- Return to Shopify frontend ---
+        return res.status(200).json({
+            verified,
+            residential,
+            message: verified
+                ? (residential ? '🏠 Residential address detected' : '🏢 Commercial address detected')
+                : '❌ Unable to verify address'
+        });
     } catch (err) {
-        console.error('💥 Handler error:', err);
-        await logErrorToWebhook('Unhandled Server Error', err, { body });
-        return res.status(500).json({ error: err.message });
+        console.error('💥 EasyPost API Error:', err);
+        await logErrorToWebhook('EasyPost API Error', err, { body });
+        return res.status(500).json({ error: 'Internal Server Error', details: err.message });
     }
 }
 
-/**
- * 🔔 Optional: Send real-time error alerts to Discord, Slack, or your webhook.
- * (Set WEBHOOK_URL in Vercel environment variables)
- */
+/* ----------------------------------------------------
+   SLACK LOGGER — Send alerts to your Slack channel
+---------------------------------------------------- */
 async function logErrorToWebhook(message, err, context = {}) {
     try {
-        if (!process.env.WEBHOOK_URL) return;
-        await fetch(process.env.WEBHOOK_URL, {
+        if (!process.env.WEBHOOK_URL) {
+            console.warn('⚠️ Missing WEBHOOK_URL in environment.');
+            return;
+        }
+
+        const payload = {
+            text: `🚨 *RDI Checker Alert*\n> *Message:* ${message}\n> *Error:* ${err?.message || 'None'
+                }\n> *Context:* \`${JSON.stringify(context, null, 2)}\`\n> *Timestamp:* ${new Date().toISOString()}`
+        };
+
+        const response = await fetch(process.env.WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                message,
-                error: err?.message || null,
-                context
-            })
+            body: JSON.stringify(payload)
         });
+
+        console.log('📡 Slack Response Status:', response.status);
+        if (!response.ok) {
+            const text = await response.text();
+            console.error('⚠️ Slack Error Response:', text);
+        }
     } catch (webhookErr) {
-        console.warn('⚠️ Failed to send error to webhook:', webhookErr.message);
+        console.error('❌ Failed to send Slack alert:', webhookErr);
     }
 }
