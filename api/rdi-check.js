@@ -80,7 +80,7 @@ export default async function handler(req, res) {
         const success = data.verifications?.delivery?.success || false;
 
         // --- Only send Slack message if this came from the delivery-check page ---
-        if (referer.includes("/pages/delivery-check")) {
+        if (referer.includes("/pages/delivery-page")) {
             console.log("✅ Slack notification triggered for delivery-check page");
 
             await sendSlackMessage(
