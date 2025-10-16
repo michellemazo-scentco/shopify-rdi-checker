@@ -1,4 +1,6 @@
 export default async function handler(req, res) {
+
+
     console.log('🚀 RDI Checker Triggered at', new Date().toISOString());
 
     // 🔐 CORS Handling
@@ -16,6 +18,9 @@ export default async function handler(req, res) {
         console.log('⚙️ Preflight request handled.');
         return res.status(200).end();
     }
+
+    await logErrorToWebhook('Test Alert', new Error('This is a Slack test'), { test: true });
+    return res.status(200).json({ ok: true, message: 'Slack test triggered!' });
 
     // 🧩 Parse body safely
     let body;
