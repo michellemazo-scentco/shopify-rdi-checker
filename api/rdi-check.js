@@ -55,32 +55,43 @@ export default async function handler(req, res) {
 
         const { address1, city, state, zip } = body;
 
-        /// Detect which page triggered the request
+        // --- Detect page context for filtering Slack messages ---
         const referer = req.headers.referer || '';
         const pageContext = req.headers['x-page-context'] || body.source || 'unknown';
+        console.log(`🧭 Triggered from: ${pageContext} (${referer})`);
 
-        // Check if this is from the delivery-check page
-        const isDeliveryCheck =
-            (referer && referer.includes('/pages/delivery-check')) ||
-            pageContext === 'delivery-check';
+        // --- Verify address via EasyPost ---
+        const response = await fetch('https://api.easypost.com/v2/addresses?verify[]=delivery', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.EASYPOST_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                address: { street1: address1, city, state, zip }
+            })
+        });
 
-        console.log(`🧭 Request from ${pageContext} (${referer})`);
-        console.log(`📩 Should notify Slack: ${isDeliveryCheck}`);
+        const data = await response.json();
+        console.log("📦 EasyPost response:", JSON.stringify(data, null, 2));
 
-        // Only send Slack message if it's from the delivery-check page
-        if (isDeliveryCheck) {
+        const residential = data.residential ?? data.verifications?.delivery?.details?.residential ?? false;
+        const success = data.verifications?.delivery?.success ?? false;
+
+        // --- Slack filtering logic ---
+        const shouldNotifySlack =
+            referer.includes('/pages/delivery-check') || pageContext === 'delivery-check';
+
+        if (shouldNotifySlack) {
             await sendSlackLog({
                 type: residential ? 'warning' : 'success',
-                title: residential
-                    ? '🏠 Residential Address Detected'
-                    : '🏢 Commercial Address Verified',
-                message: `Triggered from delivery-check page\nVerification: ${success ? '✅ Passed' : '⚠️ Failed'}`,
+                title: residential ? '🏠 Residential Address Detected' : '🏢 Commercial Address Verified',
+                message: `Triggered from ${pageContext} (${referer})\nVerification: ${success ? '✅ Passed' : '⚠️ Failed'}`,
                 context: { address1, city, state, zip, residential, success, time: new Date().toISOString() }
             });
         } else {
-            console.log('🔕 Slack notification skipped — not from delivery-check page');
+            console.log(`🔕 Slack notification skipped (triggered from ${referer || pageContext})`);
         }
-
 
         // --- Respond back to the frontend ---
         return res.status(200).json({
