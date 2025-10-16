@@ -109,35 +109,6 @@ export default async function handler(req, res) {
     }
 }
 
-// Detect page context
-const referer = req.headers.referer || '';
-const pageContext = req.headers['x-page-context'] || body.source || 'unknown';
-
-// Define which pages should trigger Slack
-const shouldNotifySlack =
-    referer.includes('/pages/delivery-check') || pageContext === 'delivery-check';
-
-// If not one of those pages, skip Slack
-if (!shouldNotifySlack) {
-    console.log(`🔕 Slack notification skipped (triggered from ${referer || pageContext})`);
-} else {
-    await sendSlackLog({
-        type: data.residential ? 'warning' : 'success',
-        title: data.residential
-            ? '🏠 Residential Address Detected'
-            : '🏢 Commercial Address Verified',
-        message: `Triggered from ${pageContext} (${referer})`,
-        context: {
-            address1,
-            city,
-            state,
-            zip,
-            result: data.residential ? 'Residential' : 'Commercial',
-        },
-    });
-}
-
-
 /* ----------------------------------------------------
    SLACK LOGGER — Send message to Slack every time
 ---------------------------------------------------- */
